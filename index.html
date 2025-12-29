@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>極限拼圖 - 手機暢玩版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #1a1a1a; 
+            touch-action: none; /* 禁止瀏覽器預設的縮放與捲動 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            -webkit-user-select: none; /* 禁止選取文字 */
+            user-select: none;
+        }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        
+        /* UI Overlay Styles */
+        .ui-panel {
+            position: absolute;
+            z-index: 10;
+            background: rgba(30, 30, 30, 0.90);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+        }
+
+        #start-screen {
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%; max-width: 500px;
+            text-align: center;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        #game-controls {
+            top: 10px; right: 10px;
+            display: none;
+            padding: 0.8rem;
+            max-width: 160px;
+        }
+
+        #progress-bar-container {
+            bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            max-width: 400px;
+            display: none;
+            pointer-events: none; /* 讓點擊穿透 */
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: white;
+            padding: 0.8rem 1.2rem; /* 加大觸控區域 */
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            touch-action: manipulation;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-secondary { background: #374151; font-size: 0.9rem; padding: 0.5rem 1rem; }
+
+        .upload-box {
+            border: 2px dashed #4b5563;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            cursor: pointer;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+        
+        /* Mobile Specific Hint */
+        .mobile-hint {
+            position: absolute;
+            top: 10px; left: 10px;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0.7;
+            font-size: 0.8rem;
+            color: #aaa;
+            display: none; /* Show only in game */
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Canvas -->
+    <div id="canvas-container">
+        <canvas id="puzzle-canvas"></canvas>
+    </div>
+    <canvas id="confetti-canvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:20;"></canvas>
+
+    <!-- Start Screen -->
+    <div id="start-screen" class="ui-panel">
+        <h1 class="text-2xl md:text-3xl font-bold mb-2 text-indigo-400">極限拼圖</h1>
+        <p class="text-gray-400 mb-4 text-xs md:text-sm">支援手機觸控：單指拖曳，雙指縮放</p>
+
+        <label for="image-upload" class="upload-box block">
+            <div id="upload-preview" class="hidden mb-3">
+                <img id="preview-img" class="h-24 md:h-32 mx-auto object-contain rounded" />
+                <p class="text-xs text-green-400 mt-2">已載入圖片</p>
+            </div>
+            <div id="upload-placeholder">
+                <svg class="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                <span class="text-gray-300 font-medium text-sm">點擊上傳圖片</span>
+                <p class="text-xs text-gray-500 mt-1">或使用預設 puzzle.jpg</p>
+            </div>
+            <input type="file" id="image-upload" accept="image/*" class="hidden">
+        </label>
+
+        <div class="mb-6 text-left">
+            <label class="block text-sm font-medium text-gray-300 mb-2">片數 (手機建議少一點)</label>
+            <select id="piece-count" class="w-full bg-gray-700 border border-gray-600 rounded p-3 text-white focus:outline-none focus:border-indigo-500 text-lg">
+                <option value="25">25 片 (手機推薦)</option>
+                <option value="49">49 片 (手機進階)</option>
+                <option value="100" selected>100 片 (平板推薦)</option>
+                <option value="300">300 片 (挑戰)</option>
+                <option value="500">500 片 (需大螢幕)</option>
+                <option value="1000">1000 片 (極限模式)</option>
+            </select>
+        </div>
+
+        <button id="start-btn" class="btn w-full text-lg shadow-lg opacity-50 cursor-not-allowed" disabled>
+            開始遊戲
+        </button>
+    </div>
+
+    <!-- In-Game Controls -->
+    <div id="game-controls" class="ui-panel flex flex-col gap-2">
+        <button id="toggle-preview-btn" class="btn btn-secondary w-full">看原圖</button>
+        <button id="reset-zoom-btn" class="btn btn-secondary w-full mt-1">重置視角</button>
+        <button id="scatter-btn" class="btn btn-secondary w-full mt-1">散開</button>
+        <button onclick="location.reload()" class="btn bg-red-800 hover:bg-red-700 w-full mt-2 text-xs">退出</button>
+    </div>
+    
+    <div id="mobile-hint" class="mobile-hint">
+        單指移動拼圖 / 空白處移動畫面<br>雙指縮放
+    </div>
+
+    <!-- Progress -->
+    <div id="progress-bar-container" class="ui-panel py-2 px-4 flex items-center gap-3">
+        <div class="text-sm font-bold whitespace-nowrap"><span id="progress-text">0</span>%</div>
+        <div class="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+            <div id="progress-fill" class="bg-indigo-500 h-full w-0 transition-all duration-300"></div>
+        </div>
+    </div>
+
+<script>
+/**
+ * PUZZLE ENGINE (Mobile Optimized)
+ */
+
+const state = {
+    pieces: [],
+    groups: [], 
+    img: null,
+    canvas: null,
+    ctx: null,
+    width: 0,
+    height: 0,
+    pieceCount: 100,
+    rows: 0,
+    cols: 0,
+    pieceWidth: 0,
+    pieceHeight: 0,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    
+    // Interaction State
+    selectedGroup: null, 
+    isDraggingPiece: false,
+    isPanning: false,
+    
+    // Coordinates
+    lastX: 0,
+    lastY: 0,
+    dragStartX: 0, // World coords when drag started
+    dragStartY: 0,
+    
+    // Touch specific
+    initialPinchDist: 0,
+    initialScale: 1,
+    
+    // Game
+    isSolved: false,
+    showPreview: false,
+    snapDistance: 0
+};
+
+const canvasEl = document.getElementById('puzzle-canvas');
+const ctx = canvasEl.getContext('2d', { alpha: false }); 
+const container = document.getElementById('canvas-container');
+
+// --- Initialization ---
+
+function init() {
+    state.canvas = canvasEl;
+    state.ctx = ctx;
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    // Input Handling
+    document.getElementById('image-upload').addEventListener('change', handleImageUpload);
+    document.getElementById('start-btn').addEventListener('click', startGame);
+    
+    // Controls
+    document.getElementById('reset-zoom-btn').addEventListener('click', resetView);
+    document.getElementById('scatter-btn').addEventListener('click', scatterPieces);
+    
+    // Preview Button (Touch friendly toggle)
+    const previewBtn = document.getElementById('toggle-preview-btn');
+    
+    // Mobile: Toggle on click
+    previewBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        state.showPreview = !state.showPreview;
+        previewBtn.style.background = state.showPreview ? '#4f46e5' : '#374151';
+        previewBtn.innerText = state.showPreview ? "關閉原圖" : "看原圖";
+    });
+
+    // Unified Event Listeners
+    // Desktop Mouse
+    container.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    container.addEventListener('wheel', onWheel, { passive: false });
+    container.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Mobile Touch
+    container.addEventListener('touchstart', onTouchStart, { passive: false });
+    container.addEventListener('touchmove', onTouchMove, { passive: false });
+    container.addEventListener('touchend', onTouchEnd);
+
+    tryLoadDefaultImage();
+    requestAnimationFrame(loop);
+}
+
+function tryLoadDefaultImage() {
+    const defaultImg = new Image();
+    defaultImg.onload = () => {
+        state.img = defaultImg;
+        document.getElementById('preview-img').src = defaultImg.src;
+        document.getElementById('upload-preview').classList.remove('hidden');
+        document.getElementById('upload-placeholder').classList.add('hidden');
+        enableStartButton();
+    };
+    defaultImg.src = "./puzzle.jpg";
+}
+
+function resizeCanvas() {
+    canvasEl.width = window.innerWidth;
+    canvasEl.height = window.innerHeight;
+    state.width = canvasEl.width;
+    state.height = canvasEl.height;
+}
+
+function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+            state.img = img;
+            document.getElementById('preview-img').src = event.target.result;
+            document.getElementById('upload-preview').classList.remove('hidden');
+            document.getElementById('upload-placeholder').classList.add('hidden');
+            enableStartButton();
+        };
+        img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function enableStartButton() {
+    const btn = document.getElementById('start-btn');
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    btn.textContent = "開始遊戲";
+}
+
+// --- Game Setup ---
+
+function startGame() {
+    if (!state.img) return;
+
+    const countVal = parseInt(document.getElementById('piece-count').value);
+    state.pieceCount = countVal;
+    
+    document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('game-controls').style.display = 'flex';
+    document.getElementById('progress-bar-container').style.display = 'flex';
+    document.getElementById('mobile-hint').style.display = 'block';
+
+    generatePuzzle();
+}
+
+function generatePuzzle() {
+    const img = state.img;
+    const ratio = img.width / img.height;
+    
+    state.cols = Math.round(Math.sqrt(state.pieceCount * ratio));
+    state.rows = Math.round(state.pieceCount / state.cols);
+    state.pieceCount = state.cols * state.rows; 
+
+    state.pieceWidth = img.width / state.cols;
+    state.pieceHeight = img.height / state.rows;
+    // Easier snapping for mobile
+    state.snapDistance = Math.max(state.pieceWidth, state.pieceHeight) * 0.5; 
+
+    resetView();
+
+    state.pieces = [];
+    state.groups = [];
+
+    for (let r = 0; r < state.rows; r++) {
+        for (let c = 0; c < state.cols; c++) {
+            const index = r * state.cols + c;
+            
+            const top = (r === 0) ? 0 : -state.pieces[(r - 1) * state.cols + c].shape.bottom;
+            const right = (c === state.cols - 1) ? 0 : (Math.random() > 0.5 ? 1 : -1);
+            const bottom = (r === state.rows - 1) ? 0 : (Math.random() > 0.5 ? 1 : -1);
+            const left = (c === 0) ? 0 : -state.pieces[index - 1].shape.right;
+
+            const piece = {
+                id: index,
+                r, c,
+                x: 0, y: 0, 
+                targetX: c * state.pieceWidth,
+                targetY: r * state.pieceHeight,
+                width: state.pieceWidth,
+                height: state.pieceHeight,
+                shape: { top, right, bottom, left },
+            };
+            
+            state.pieces.push(piece);
+            state.groups.push([index]); 
+        }
+    }
+
+    scatterPieces();
+}
+
+function scatterPieces() {
+    const spreadW = state.img.width * 1.5;
+    const spreadH = state.img.height * 1.5;
+
+    state.pieces.forEach(p => {
+        p.x = (Math.random() * spreadW) - (spreadW/4);
+        p.y = (Math.random() * spreadH) - (spreadH/4);
+    });
+}
+
+function resetView() {
+    const padding = 50;
+    // Initial view: Fit Image
+    const scaleX = (state.width - padding*2) / state.img.width;
+    const scaleY = (state.height - padding*2) / state.img.height;
+    state.scale = Math.min(scaleX, scaleY, 1) * 0.8; 
+    
+    const imgDisplayW = state.img.width * state.scale;
+    const imgDisplayH = state.img.height * state.scale;
+    state.offsetX = (state.width - imgDisplayW) / 2;
+    state.offsetY = (state.height - imgDisplayH) / 2;
+}
+
+// --- TOUCH HANDLING (Mobile Core) ---
+
+function onTouchStart(e) {
+    e.preventDefault();
+    const touches = e.touches;
+
+    if (touches.length === 1) {
+        // Single finger: Check if hitting piece or background
+        const t = touches[0];
+        const mouseX = t.clientX;
+        const mouseY = t.clientY;
+        
+        state.lastX = mouseX;
+        state.lastY = mouseY;
+        
+        // Check hit
+        const worldX = (mouseX - state.offsetX) / state.scale;
+        const worldY = (mouseY - state.offsetY) / state.scale;
+        
+        const group = findHitGroup(worldX, worldY);
+        
+        if (group) {
+            // Hit piece -> Drag Piece
+            state.isDraggingPiece = true;
+            state.isPanning = false;
+            state.selectedGroup = group;
+            // Move group to top
+            moveToTop(group);
+        } else {
+            // Hit empty -> Pan View
+            state.isDraggingPiece = false;
+            state.isPanning = true;
+        }
+
+    } else if (touches.length === 2) {
+        // Two fingers: Pinch Zoom & Pan
+        state.isDraggingPiece = false;
+        state.isPanning = true;
+        state.initialPinchDist = getPinchDist(touches);
+        state.initialScale = state.scale;
+        
+        // Also capture center for panning
+        const center = getPinchCenter(touches);
+        state.lastX = center.x;
+        state.lastY = center.y;
+    }
+}
+
+function onTouchMove(e) {
+    e.preventDefault();
+    const touches = e.touches;
+
+    if (touches.length === 1) {
+        const t = touches[0];
+        const dx = t.clientX - state.lastX;
+        const dy = t.clientY - state.lastY;
+        
+        state.lastX = t.clientX;
+        state.lastY = t.clientY;
+
+        if (state.isDraggingPiece && state.selectedGroup) {
+            moveGroup(state.selectedGroup, dx, dy);
+        } else if (state.isPanning) {
+            state.offsetX += dx;
+            state.offsetY += dy;
+        }
+
+    } else if (touches.length === 2) {
+        // Pinch Zoom Logic
+        const newDist = getPinchDist(touches);
+        const center = getPinchCenter(touches);
+        
+        // 1. Pan processing (midpoint moved)
+        const dx = center.x - state.lastX;
+        const dy = center.y - state.lastY;
+        state.offsetX += dx;
+        state.offsetY += dy;
+        state.lastX = center.x;
+        state.lastY = center.y;
+
+        // 2. Zoom processing
+        if (state.initialPinchDist > 0) {
+            const zoomFactor = newDist / state.initialPinchDist;
+            const newScale = Math.max(0.1, Math.min(5, state.initialScale * zoomFactor));
+            
+            // Zoom towards center point
+            // Logic: keep world coords under center point stationary
+            // World = (Screen - Offset) / Scale
+            // World * NewScale + NewOffset = Screen
+            // NewOffset = Screen - World * NewScale
+            
+            const worldX = (center.x - state.offsetX) / state.scale;
+            const worldY = (center.y - state.offsetY) / state.scale;
+            
+            state.scale = newScale;
+            state.offsetX = center.x - worldX * newScale;
+            state.offsetY = center.y - worldY * newScale;
+        }
+    }
+}
+
+function onTouchEnd(e) {
+    if (state.isDraggingPiece) {
+        dropPiece();
+    }
+    state.isDraggingPiece = false;
+    state.isPanning = false;
+    state.selectedGroup = null;
+    
+    // If still one finger left, update lastX/Y to avoid jumps
+    if (e.touches.length === 1) {
+        state.lastX = e.touches[0].clientX;
+        state.lastY = e.touches[0].clientY;
+    }
+}
+
+function getPinchDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+}
+
+function getPinchCenter(touches) {
+    return {
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2
+    };
+}
+
+// --- MOUSE HANDLING (Desktop Fallback) ---
+
+function onMouseDown(e) {
+    e.preventDefault();
+    state.lastX = e.clientX;
+    state.lastY = e.clientY;
+    
+    const isRightClick = e.button === 2;
+    if (isRightClick || e.ctrlKey) {
+        state.isPanning = true;
+        container.classList.add('grabbing');
+        return;
+    }
+
+    const worldX = (e.clientX - state.offsetX) / state.scale;
+    const worldY = (e.clientY - state.offsetY) / state.scale;
+    
+    const group = findHitGroup(worldX, worldY);
+    if (group) {
+        state.isDraggingPiece = true;
+        state.selectedGroup = group;
+        moveToTop(group);
+    } else {
+        state.isPanning = true;
+        container.classList.add('grabbing');
+    }
+}
+
+function onMouseMove(e) {
+    e.preventDefault();
+    const dx = e.clientX - state.lastX;
+    const dy = e.clientY - state.lastY;
+    state.lastX = e.clientX;
+    state.lastY = e.clientY;
+
+    if (state.isPanning) {
+        state.offsetX += dx;
+        state.offsetY += dy;
+    } else if (state.isDraggingPiece && state.selectedGroup) {
+        moveGroup(state.selectedGroup, dx, dy);
+    }
+}
+
+function onMouseUp(e) {
+    if (state.isDraggingPiece) dropPiece();
+    state.isDraggingPiece = false;
+    state.isPanning = false;
+    state.selectedGroup = null;
+    container.classList.remove('grabbing');
+}
+
+function onWheel(e) {
+    e.preventDefault();
+    const zoomIntensity = 0.1;
+    const direction = e.deltaY > 0 ? -1 : 1;
+    const factor = 1 + (direction * zoomIntensity);
+    
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
+    
+    const worldX = (mouseX - state.offsetX) / state.scale;
+    const worldY = (mouseY - state.offsetY) / state.scale;
+    
+    const newScale = Math.max(0.1, Math.min(5, state.scale * factor));
+    state.offsetX = mouseX - worldX * newScale;
+    state.offsetY = mouseY - worldY * newScale;
+    state.scale = newScale;
+}
+
+// --- Shared Logic ---
+
+function findHitGroup(wx, wy) {
+    // Check bounding box first
+    const hitPiece = (p) => wx >= p.x && wx <= p.x + p.width && wy >= p.y && wy <= p.y + p.height;
+
+    // Search from top to bottom
+    for (let i = state.groups.length - 1; i >= 0; i--) {
+        const group = state.groups[i];
+        if (group.some(pid => hitPiece(state.pieces[pid]))) {
+            return group;
+        }
+    }
+    return null;
+}
+
+function moveToTop(group) {
+    state.groups = state.groups.filter(g => g !== group);
+    state.groups.push(group);
+}
+
+function moveGroup(group, pixelDx, pixelDy) {
+    const wDx = pixelDx / state.scale;
+    const wDy = pixelDy / state.scale;
+    group.forEach(pid => {
+        state.pieces[pid].x += wDx;
+        state.pieces[pid].y += wDy;
+    });
+}
+
+function dropPiece() {
+    if (!state.selectedGroup) return;
+    const group = state.selectedGroup;
+    let merged = false;
+    const groupSet = new Set(group);
+
+    // Simplified snap logic
+    for (const pid of group) {
+        const p = state.pieces[pid];
+        // Check 4 directions
+        const neighbors = [
+            { r: p.r-1, c: p.c }, { r: p.r+1, c: p.c },
+            { r: p.r, c: p.c-1 }, { r: p.r, c: p.c+1 }
+        ];
+
+        for (const n of neighbors) {
+            if (n.r >= 0 && n.r < state.rows && n.c >= 0 && n.c < state.cols) {
+                const neighborId = n.r * state.cols + n.c;
+                if (!groupSet.has(neighborId)) {
+                    const np = state.pieces[neighborId];
+                    // Dist based on theoretical offset
+                    const dist = Math.hypot(
+                        (p.x - p.targetX) - (np.x - np.targetX),
+                        (p.y - p.targetY) - (np.y - np.targetY)
+                    );
+
+                    if (dist < state.snapDistance) {
+                        mergeGroups(group, neighborId);
+                        merged = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (merged) break;
+    }
+    if (merged) checkWin();
+}
+
+function mergeGroups(movingGroupIds, targetPieceId) {
+    let targetGroupIdx = -1;
+    for (let i = 0; i < state.groups.length; i++) {
+        if (state.groups[i].includes(targetPieceId)) {
+            targetGroupIdx = i;
+            break;
+        }
+    }
+    if (targetGroupIdx === -1) return;
+    
+    const targetGroup = state.groups[targetGroupIdx];
+    const anchor = state.pieces[targetPieceId];
+    const driftX = anchor.x - anchor.targetX;
+    const driftY = anchor.y - anchor.targetY;
+    
+    movingGroupIds.forEach(pid => {
+        const p = state.pieces[pid];
+        p.x = p.targetX + driftX;
+        p.y = p.targetY + driftY;
+    });
+
+    state.groups[targetGroupIdx] = targetGroup.concat(movingGroupIds);
+    // Remove old group (which was moved to end of array by moveToTop)
+    state.groups.pop(); 
+    
+    updateProgress();
+}
+
+function updateProgress() {
+    const total = state.pieces.length;
+    const solved = total - state.groups.length;
+    const percent = Math.floor((solved / (total - 1)) * 100);
+    document.getElementById('progress-text').innerText = isNaN(percent) ? 0 : percent;
+    document.getElementById('progress-fill').style.width = (isNaN(percent) ? 0 : percent) + '%';
+}
+
+function checkWin() {
+    if (state.groups.length === 1) {
+        state.isSolved = true;
+        launchConfetti();
+    }
+}
+
+// --- Render & Helper (Same as before) ---
+function loop() { draw(); requestAnimationFrame(loop); }
+
+function draw() {
+    const { ctx, width, height, scale, offsetX, offsetY, img, pieces, groups } = state;
+    if (!ctx) return;
+
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, width, height);
+
+    if (!img) return;
+
+    if (state.showPreview) {
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = 0.5;
+        ctx.drawImage(img, 0, 0);
+        ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+
+    for (const group of groups) {
+        const isSelected = (group === state.selectedGroup);
+        if (isSelected) {
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetY = 10;
+        } else {
+            ctx.shadowColor = 'transparent';
+        }
+
+        for (const pid of group) {
+            const p = pieces[pid];
+            // Culling
+            const sx = p.x * scale + offsetX;
+            const sy = p.y * scale + offsetY;
+            if (sx > width || sx + p.width*scale < 0 || sy > height || sy + p.height*scale < 0) continue;
+            drawPiece(ctx, p, img);
+        }
+    }
+    ctx.restore();
+}
+
+function drawPiece(ctx, p, img) {
+    ctx.save();
+    const sz = Math.min(p.width, p.height);
+    const neck = sz * 0.15, tabSize = sz * 0.25, tabW = sz * 0.3; 
+
+    ctx.beginPath();
+    let cx = p.x, cy = p.y;
+    ctx.moveTo(cx, cy);
+
+    if (p.shape.top) drawSide(ctx, cx, cy, p.width, 0, p.shape.top, neck, tabSize, tabW);
+    else ctx.lineTo(cx + p.width, cy);
+    cx += p.width;
+
+    if (p.shape.right) drawSide(ctx, cx, cy, 0, p.height, p.shape.right, neck, tabSize, tabW);
+    else ctx.lineTo(cx, cy + p.height);
+    cy += p.height;
+
+    if (p.shape.bottom) drawSide(ctx, cx, cy, -p.width, 0, p.shape.bottom, neck, tabSize, tabW);
+    else ctx.lineTo(cx - p.width, cy);
+    cx -= p.width;
+
+    if (p.shape.left) drawSide(ctx, cx, cy, 0, -p.height, p.shape.left, neck, tabSize, tabW);
+    else ctx.lineTo(cx, cy - p.height);
+    
+    ctx.closePath();
+    ctx.clip();
+    
+    const m = tabSize * 2; 
+    ctx.drawImage(img, p.targetX-m, p.targetY-m, p.width+m*2, p.height+m*2, p.x-m, p.y-m, p.width+m*2, p.height+m*2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.restore();
+}
+
+function drawSide(ctx, x, y, dx, dy, type, neck, h, w) {
+    const len = Math.abs(dx || dy), sign = type; 
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.atan2(dy, dx));
+    
+    ctx.lineTo(len * 0.35, 0);
+    ctx.bezierCurveTo(len*0.35, -sign*h*0.5, len*0.5-w, -sign*h, len*0.5-w, -sign*h);
+    ctx.bezierCurveTo(len*0.5-w, -sign*h*1.5, len*0.5+w, -sign*h*1.5, len*0.5+w, -sign*h);
+    ctx.bezierCurveTo(len*0.5+w, -sign*h, len*0.65, -sign*h*0.5, len*0.65, 0);
+    ctx.lineTo(len, 0);
+    ctx.restore();
+}
+
+function launchConfetti() {
+    const c = document.getElementById('confetti-canvas');
+    const ctx = c.getContext('2d');
+    c.width = window.innerWidth; c.height = window.innerHeight;
+    const p = Array(300).fill().map(() => ({
+        x: c.width/2, y: c.height/2, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20,
+        color: `hsl(${Math.random()*360}, 100%, 50%)`, life: 1
+    }));
+    function anim() {
+        ctx.clearRect(0,0,c.width,c.height);
+        let a = false;
+        p.forEach(i => {
+            if(i.life>0) {
+                a=true; i.x+=i.vx; i.y+=i.vy; i.vy+=0.2; i.life-=0.01;
+                ctx.fillStyle=i.color; ctx.globalAlpha=i.life; ctx.fillRect(i.x,i.y,8,8);
+            }
+        });
+        if(a) requestAnimationFrame(anim);
+    }
+    anim();
+}
+
+init();
+
+</script>
+</body>
+</html>
